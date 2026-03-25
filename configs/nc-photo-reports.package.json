@@ -1,0 +1,44 @@
+{
+  "name": "nc-photo-reports",
+  "version": "1.0.0",
+  "description": "NC Photo Reports - WhatsApp Desktop",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "node scripts/build.js",
+    "build:mac": "node scripts/build.js mac x64",
+    "build:mac:arm64": "node scripts/build.js mac arm64"
+  },
+  "author": "Sergey Chilingaryan",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0"
+  },
+  "build": {
+    "appId": "com.sergchil.nc-photo-reports",
+    "productName": "NC Photo Reports",
+    "directories": { "output": "dist/nc-photo-reports" },
+    "files": ["main.js", "preload.js", "sessionManager.js", "assets/**/*", "node_modules/**/*", ".env"],
+    "mac": {
+      "target": [
+        { "target": "dir", "arch": ["x64", "arm64"] },
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "identity": null,
+      "category": "public.app-category.social-networking",
+      "icon": "assets/Appicons/WhatsApp.png"
+    },
+    "win": {
+      "target": [
+        { "target": "dir", "arch": ["x64", "arm64"] },
+        { "target": "nsis", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "assets/Appicons/WhatsApp.ico",
+      "executableName": "NC Photo Reports"
+    }
+  }
+}
