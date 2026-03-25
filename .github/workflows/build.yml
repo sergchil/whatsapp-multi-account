@@ -1,218 +1,17 @@
-name: Build Electron Session Manager
+name: Build WhatsApp Apps
 
 on:
   push:
     branches: [ main, master ]
     tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
-  # Build x64 apps (stable)
-  build-x64-apps:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        # do not erase this comment - it is used to generate the matrix
-        os: [windows-latest, macos-latest, ubuntu-latest]
-        app: [asana, chatgpt, discord, notion, whatsappweb]
-        include:
-          - os: windows-latest
-            platform: win
-          - os: macos-latest  
-            platform: mac
-          - os: ubuntu-latest
-            platform: linux
-        
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Build ${{ matrix.app }} for ${{ matrix.platform }}-x64
-      shell: bash
-      run: |
-        echo "🚀 Building ${{ matrix.app }} for ${{ matrix.platform }}-x64..."
-        
-        # Backup current files if they exist
-        if [ -f "package.json" ]; then
-          cp package.json temp.package.json.backup
-        fi
-        if [ -f ".env" ]; then
-          cp .env temp.env.backup
-        fi
-        
-        # Copy app-specific configuration
-        cp "configs/${{ matrix.app }}.package.json" package.json
-        cp "configs/${{ matrix.app }}.env" .env
-        
-        # Build the app for x64 architecture only
-        node scripts/build.js ${{ matrix.platform }} x64
-        
-        # Restore original files
-        if [ -f "temp.package.json.backup" ]; then
-          mv temp.package.json.backup package.json
-        else
-          rm -f package.json
-        fi
-        if [ -f "temp.env.backup" ]; then
-          mv temp.env.backup .env
-        else
-          rm -f .env
-        fi
-      env:
-        CSC_IDENTITY_AUTO_DISCOVERY: false
-        SKIP_CODE_SIGNING: true
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Prepare files for upload
-      shell: bash
-      run: |
-        # Create archives directory
-        mkdir -p archives
-
-        # Get app display name from config
-        APP_NAME=$(grep "APP_NAME=" "configs/${{ matrix.app }}.env" | cut -d'=' -f2 | tr -d '"')
-        if [ -z "$APP_NAME" ]; then
-          APP_NAME="${{ matrix.app }}"
-        fi
-        
-        # Export APP_NAME for use in subsequent steps
-        echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
-        
-        echo "📦 Preparing files for $APP_NAME (${{ matrix.app }}-${{ matrix.platform }}-x64)..."
-        
-        # Navigate to build output directory
-        cd "dist/${{ matrix.app }}"
-        
-        # Debug: List all files in the directory
-        echo "📁 Files in dist/${{ matrix.app }}:"
-        ls -la
-        
-        if [ "${{ matrix.platform }}" = "win" ]; then
-          # Windows: Copy .exe files directly (no archiving)
-          echo "🪟 Windows: Copying .exe files directly..."
-          
-          # Copy installer exe files
-          if ls *setup*.exe 1> /dev/null 2>&1; then
-            echo "📦 Copying installer .exe files..."
-            cp *setup*.exe "../../archives/"
-          fi
-          
-          # Copy portable exe files (non-setup)
-          for exe in *.exe; do
-            if [[ "$exe" != *setup* ]]; then
-              echo "📦 Copying portable .exe file: $exe"
-              cp "$exe" "../../archives/"
-            fi
-          done
-        elif [ "${{ matrix.platform }}" = "mac" ]; then
-          # macOS: Copy .dmg files directly (no archiving)
-          echo "🍎 macOS: Copying .dmg files directly..."
-          if ls *.dmg 1> /dev/null 2>&1; then
-            echo "✅ Found .dmg files, copying directly..."
-            cp *.dmg "../../archives/"
-          else
-            echo "⚠️ No .dmg files found, checking for other Mac files..."
-            if ls *.app 1> /dev/null 2>&1; then
-              echo "📦 Found .app bundles, creating archive as fallback..."
-              tar -czf "../../archives/${{ matrix.app }}-${{ matrix.platform }}-x64.tar.gz" *.app
-            else
-              echo "❌ No Mac build artifacts found!"
-              echo "Build completed but no Mac artifacts were generated" > build-info.txt
-              cp build-info.txt "../../archives/${{ matrix.app }}-mac-build-info.txt"
-            fi
-          fi
-        elif [ "${{ matrix.platform }}" = "linux" ]; then
-          # Linux: Copy .deb and .AppImage files directly (no archiving)
-          echo "🐧 Linux: Copying package files directly..."
-          
-          # Copy .deb files directly
-          if ls *.deb 1> /dev/null 2>&1; then
-            echo "✅ Found deb packages, copying directly..."
-            cp *.deb "../../archives/"
-          fi
-          
-          # Copy AppImage files directly
-          if ls *.AppImage 1> /dev/null 2>&1; then
-            echo "✅ Found AppImage files, copying directly..."
-            cp *.AppImage "../../archives/"
-          fi
-          
-          # Fallback for other Linux packages
-          if [ ! -f ../../archives/*.deb ] && [ ! -f ../../archives/*.AppImage ]; then
-            echo "⚠️ No standard Linux packages found, creating info file..."
-            echo "Linux build completed but no packages found" > build-info.txt
-            cp build-info.txt "../../archives/${{ matrix.app }}-linux-build-info.txt"
-          fi
-        fi
-        
-        # Show what files were prepared
-        echo "📋 Files prepared for upload:"
-        ls -la "../../archives/"
-        
-    # Upload Windows artifacts (separate installer and portable)
-    - name: Upload Windows Installer artifact
-      if: matrix.platform == 'win'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.APP_NAME }} (Windows-x64 Installer)
-        path: archives/*setup*.exe
-        retention-days: 90
-        
-    - name: Upload Windows Portable artifact
-      if: matrix.platform == 'win'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.APP_NAME }} (Windows-x64)
-        path: |
-          archives/*.exe
-          !archives/*setup*.exe
-        retention-days: 90
-        
-    - name: Upload macOS artifact  
-      if: matrix.platform == 'mac'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.APP_NAME }} (Apple-Intel)
-        path: |
-          archives/*.dmg
-          archives/*.tar.gz
-        retention-days: 90
-        
-    # Upload Linux artifacts (separate by package type)
-    - name: Upload Linux Debian/Ubuntu artifact
-      if: matrix.platform == 'linux'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.APP_NAME }} (Debian & Ubuntu)
-        path: archives/*.deb
-        retention-days: 90
-
-    - name: Upload Linux General artifact
-      if: matrix.platform == 'linux'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.APP_NAME }} (General Linux)
-        path: archives/*.AppImage
-        retention-days: 90
-
-  # Apple Silicon builds (macOS ARM64)
-  build-apple-silicon-apps:
+  build-mac-apps:
     runs-on: macos-latest
     strategy:
       matrix:
-        # app: [asana, chatgpt, discord, notion, whatsappweb]      
-        app: [whatsappweb]  # Start with one app, will expand later
+        app: [nc-business, nc-photo-reports, personal]
         
     steps:
     - name: Checkout code
@@ -227,88 +26,54 @@ jobs:
     - name: Install dependencies
       run: npm ci
       
-    - name: Build ${{ matrix.app }} for Apple Silicon
+    - name: Build ${{ matrix.app }} for macOS (x64 + ARM64)
       shell: bash
       run: |
-        echo "🍎 Building ${{ matrix.app }} for Apple Silicon (ARM64)..."
+        echo "🍎 Building ${{ matrix.app }}..."
         
-        # Backup current files if they exist
-        if [ -f "package.json" ]; then
-          cp package.json temp.package.json.backup
-        fi
-        if [ -f ".env" ]; then
-          cp .env temp.env.backup
-        fi
+        cp package.json temp.package.json.backup 2>/dev/null || true
+        cp .env temp.env.backup 2>/dev/null || true
         
-        # Copy app-specific configuration
         cp "configs/${{ matrix.app }}.package.json" package.json
         cp "configs/${{ matrix.app }}.env" .env
         
-        # Build the app for arm64 architecture (Apple Silicon)
+        # Build universal binary (x64 + arm64)
+        node scripts/build.js mac x64
         node scripts/build.js mac arm64
         
-        # Restore original files
-        if [ -f "temp.package.json.backup" ]; then
-          mv temp.package.json.backup package.json
-        else
-          rm -f package.json
-        fi
-        if [ -f "temp.env.backup" ]; then
-          mv temp.env.backup .env
-        else
-          rm -f .env
-        fi
+        mv temp.package.json.backup package.json 2>/dev/null || rm -f package.json
+        mv temp.env.backup .env 2>/dev/null || rm -f .env
       env:
         CSC_IDENTITY_AUTO_DISCOVERY: false
         SKIP_CODE_SIGNING: true
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Prepare Apple Silicon DMG
+    - name: Prepare DMG files
       shell: bash
       run: |
-        # Create archive directory
         mkdir -p archives
         
-        # Get app display name from config
         APP_NAME=$(grep "APP_NAME=" "configs/${{ matrix.app }}.env" | cut -d'=' -f2 | tr -d '"')
-        if [ -z "$APP_NAME" ]; then
-          APP_NAME="${{ matrix.app }}"
-        fi
-        
-        # Export APP_NAME for use in subsequent steps
         echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
-
-        echo "🍎 Preparing Apple Silicon DMG for $APP_NAME..."
         
-        # Navigate to build directory
+        echo "📦 Preparing $APP_NAME..."
         cd "dist/${{ matrix.app }}"
-        
-        # Debug: List all files in the directory
-        echo "📁 Files in dist/${{ matrix.app }}:"
         ls -la
         
-        # Copy DMG files directly (no archiving)
         if ls *.dmg 1> /dev/null 2>&1; then
-          echo "✅ Found DMG files, copying directly..."
           cp *.dmg "../../archives/"
-        else
-          echo "❌ No DMG files found for Apple Silicon build!"
-          echo "Available files:"
-          ls -la
-          # Create a placeholder file
-          echo "Apple Silicon build failed - no DMG generated" > "../../archives/${{ matrix.app }}-apple-silicon-failed.txt"
         fi
         
-    - name: Upload Apple Silicon artifact
+    - name: Upload macOS artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.APP_NAME }} (Apple-Silicon)
+        name: ${{ env.APP_NAME }}
         path: archives/*.dmg
         retention-days: 90
         
   create-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-x64-apps, build-apple-silicon-apps]  # Include both x64 and Apple Silicon builds
+    needs: [build-mac-apps]
     runs-on: ubuntu-latest
     
     steps:
@@ -323,86 +88,27 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          artifacts/**/*.exe
-          artifacts/**/*.dmg
-          artifacts/**/*.deb
-          artifacts/**/*.AppImage
-          artifacts/**/*.tar.gz
-        name: Electron Session Manager Apps Release ${{ github.ref_name }}
+        files: artifacts/**/*.dmg
+        name: WhatsApp Apps ${{ github.ref_name }}
         body: |
-          # 🚀 Electron Session Manager
+          # WhatsApp Desktop Apps for macOS
           
-          Download only the apps you need! Each application is available as a separate download for your platform.
+          Three separate WhatsApp apps, each with its own isolated session.
           
-          ## 📱 Available Applications
+          ## Downloads
           
-          ### 🎯 Asana Sessions - Project Management
-          - 🪟 **Windows x64**: [Installer](../../releases/download/${{ github.ref_name }}/asana-setup.exe) | [Portable](../../releases/download/${{ github.ref_name }}/asana.exe)
-          - 🍎 **macOS Intel**: [Download](../../releases/download/${{ github.ref_name }}/asana.dmg)
-          - 🐧 **Linux**: [Debian/Ubuntu](../../releases/download/${{ github.ref_name }}/asana.deb) | [AppImage](../../releases/download/${{ github.ref_name }}/asana.AppImage)
+          - **NC Business** - WhatsApp for business communications
+          - **NC Photo Reports** - WhatsApp for photo reports
+          - **Personal** - Personal WhatsApp
           
-          ### 🤖 ChatGPT Sessions - AI Assistant
-          - 🪟 **Windows x64**: [Installer](../../releases/download/${{ github.ref_name }}/chatgpt-setup.exe) | [Portable](../../releases/download/${{ github.ref_name }}/chatgpt.exe)
-          - 🍎 **macOS Intel**: [Download](../../releases/download/${{ github.ref_name }}/chatgpt.dmg)
-          - 🐧 **Linux**: [Debian/Ubuntu](../../releases/download/${{ github.ref_name }}/chatgpt.deb) | [AppImage](../../releases/download/${{ github.ref_name }}/chatgpt.AppImage)
+          ## Installation
           
-          ### 🎮 Discord Sessions - Chat Platform  
-          - 🪟 **Windows x64**: [Installer](../../releases/download/${{ github.ref_name }}/discord-setup.exe) | [Portable](../../releases/download/${{ github.ref_name }}/discord.exe)
-          - 🍎 **macOS Intel**: [Download](../../releases/download/${{ github.ref_name }}/discord.dmg)
-          - 🐧 **Linux**: [Debian/Ubuntu](../../releases/download/${{ github.ref_name }}/discord.deb) | [AppImage](../../releases/download/${{ github.ref_name }}/discord.AppImage)
+          1. Download the .dmg file for each app you want
+          2. Double-click to mount
+          3. Drag to Applications folder
+          4. Open and scan QR code to login
           
-          ### 📝 Notion Sessions - All-in-one Workspace
-          - 🪟 **Windows x64**: [Installer](../../releases/download/${{ github.ref_name }}/notion-setup.exe) | [Portable](../../releases/download/${{ github.ref_name }}/notion.exe)
-          - 🍎 **macOS Intel**: [Download](../../releases/download/${{ github.ref_name }}/notion.dmg)
-          - 🐧 **Linux**: [Debian/Ubuntu](../../releases/download/${{ github.ref_name }}/notion.deb) | [AppImage](../../releases/download/${{ github.ref_name }}/notion.AppImage)
-          
-          ### 💬 WhatsApp Sessions - Messaging
-          - 🪟 **Windows x64**: [Installer](../../releases/download/${{ github.ref_name }}/whatsappweb-setup.exe) | [Portable](../../releases/download/${{ github.ref_name }}/whatsappweb.exe)
-          - 🍎 **macOS Intel**: [Download](../../releases/download/${{ github.ref_name }}/whatsappweb.dmg)
-          - 🍎 **macOS Apple Silicon (ARM64)**: [Download](../../releases/download/${{ github.ref_name }}/WhatsApp%20Sessions.dmg) ⭐ **NEW!**
-          - 🐧 **Linux**: [Debian/Ubuntu](../../releases/download/${{ github.ref_name }}/whatsappweb.deb) | [AppImage](../../releases/download/${{ github.ref_name }}/whatsappweb.AppImage)
-          
-          ## 🏗️ Architecture Support
-          
-          This release includes:
-          - **x64 (Intel/AMD)** builds for all platforms (Windows, macOS, Linux)
-          - **Apple Silicon (ARM64)** builds for macOS (WhatsApp Sessions only - more apps coming soon!)
-          
-          **Coming Soon:**
-          - ARM64 builds for all apps (Apple Silicon, Windows ARM, Raspberry Pi)
-          - Mobile app versions (experimental)
-          
-          ## 📦 Windows Downloads
-          
-          **Two options available for Windows:**
-          - **🪟 Installer**: Traditional Windows installer with uninstaller (recommended for most users)
-          - **📦 Portable**: Standalone executable that doesn't require installation (for advanced users)
-          
-          ## 🔧 Installation Instructions
-          
-          1. **Download** the app you want for your platform by clicking the links above
-          2. **Install/Run** the application:
-             - **Windows Installer**: Run the downloaded `.exe` file and follow the installation wizard
-             - **Windows Portable**: Double-click the downloaded `.exe` file directly (no installation needed)
-             - **macOS (.dmg)**: Double-click to mount, then drag the app to Applications folder
-             - **Linux (.deb)**: Install with `sudo dpkg -i filename.deb` or use your package manager
-             - **Linux (.AppImage)**: Make executable and run: `chmod +x filename.AppImage && ./filename.AppImage`
-          
-          ## ⚠️ Security Note
-          
-          These applications are unsigned. You may need to:
-          - **Windows**: Allow the app in Windows Defender SmartScreen
-          - **macOS**: Allow the app in System Preferences > Security & Privacy  
-          - **Linux**: Mark the executable as trusted
-          
-          ## 📝 For Developers
-          
-          Want to build your own PWA with session management or customize these apps? Visit the [repository](https://github.com/${{ github.repository }}) and follow the README instructions.
-          
-          ---
-          
-          Built with ❤️ using [Electron Session Manager](https://github.com/${{ github.repository }})
+          Each app maintains its own separate login session.
         draft: false
         prerelease: false
       env:
