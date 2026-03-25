@@ -37,9 +37,9 @@ jobs:
         cp "configs/${{ matrix.app }}.package.json" package.json
         cp "configs/${{ matrix.app }}.env" .env
         
-        # Build universal binary (x64 + arm64)
-        node scripts/build.js mac x64
-        node scripts/build.js mac arm64
+        # Build universal binary (x64 + arm64) without publishing
+        npx electron-builder --mac --x64 --publish=never
+        npx electron-builder --mac --arm64 --publish=never
         
         mv temp.package.json.backup package.json 2>/dev/null || rm -f package.json
         mv temp.env.backup .env 2>/dev/null || rm -f .env
